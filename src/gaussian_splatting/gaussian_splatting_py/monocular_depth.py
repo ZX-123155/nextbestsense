@@ -4,15 +4,31 @@ from enum import Enum
 
 import sys
 import torch
+import os
 
 import cv2
 from matplotlib import pyplot as plt
 from gaussian_splatting_py.load_yaml import load_config
 from gaussian_splatting_py.vision_utils.vision_utils import preprocess_image, resize_if_too_large
 
-from gaussian_splatting_py.metric_depth.depth_anything_v2.dpt import DepthAnythingV2 as MetricDepthAnythingV2
+depth_anything_path = os.path.expanduser(os.environ.get("DEPTH_ANYTHING_V2_PATH", "~/Depth-Anything-V2"))
+if os.path.isdir(depth_anything_path) and depth_anything_path not in sys.path:
+    sys.path.append(depth_anything_path)
 
+try:
+    from depth_anything_v2.dpt import DepthAnythingV2
+    print(f"✅ 成功导入 DepthAnythingV2: {depth_anything_path}")
+except ImportError as e:
+    print(f"❌ 导入失败: {e}")
+    try:
+        from .depth_anything_v2.dpt import DepthAnythingV2
+    except ImportError:
+        from depth_anything_v2_local import DepthAnythingV2
 
+try:
+    from metric_depth.depth_anything_v2.dpt import DepthAnythingV2 as MetricDepthAnythingV2
+except ImportError:
+    MetricDepthAnythingV2 = DepthAnythingV2
 
 MODEL_LIST = {
     'DEPTH_ANYTHING': 'DepthAnythingV2',
@@ -35,16 +51,49 @@ def build_model(cfg):
     model_name = model_cfg["name"]
     model_type = model_cfg["type"]
     if model_name == MODEL_LIST['DEPTH_ANYTHING']:
-        model = MetricDepthAnythingV2(**{**DEPTH_ANYTHING_CONFIGS[model_type], 'max_depth': MAX_DA_DEPTH})
-        checkpoint_dir = osp.join(osp.dirname(osp.abspath(__file__)), "checkpoints") 
-        
-        model.load_state_dict(torch.load(f'{checkpoint_dir}/depth_anything_v2_metric_{FINETUNED_DATASET}_{model_type}.pth', map_location='cpu'))
-        model.cuda().eval()
+        local_checkpoint_dir = osp.join(osp.dirname(osp.abspath(__file__)), "checkpoints")
+        external_checkpoint_dir = osp.join(depth_anything_path, "checkpoints")
+        metric_ckpt = f'depth_anything_v2_metric_{FINETUNED_DATASET}_{model_type}.pth'
+        non_metric_ckpt = f'depth_anything_v2_{model_type}.pth'
+        checkpoint_candidates = [metric_ckpt, non_metric_ckpt]
+
+        checkpoint_path = None
+        for ckpt_name in checkpoint_candidates:
+            for ckpt_dir in [local_checkpoint_dir, external_checkpoint_dir]:
+                candidate = osp.join(ckpt_dir, ckpt_name)
+                if osp.exists(candidate):
+                    checkpoint_path = candidate
+                    break
+            if checkpoint_path is not None:
+                break
+
+        if checkpoint_path is None:
+            raise FileNotFoundError(
+                f"No DepthAnything checkpoint found. Checked {checkpoint_candidates} in {local_checkpoint_dir} and {external_checkpoint_dir}"
+            )
+
+        if osp.basename(checkpoint_path) == metric_ckpt and MetricDepthAnythingV2 is not None:
+            model_kwargs = {**DEPTH_ANYTHING_CONFIGS[model_type], 'max_depth': MAX_DA_DEPTH}
+            model = MetricDepthAnythingV2(**model_kwargs)
+            print(f"Using METRIC DepthAnything checkpoint: {checkpoint_path}")
+        else:
+            model = DepthAnythingV2(**DEPTH_ANYTHING_CONFIGS[model_type])
+            print(f"Using RELATIVE DepthAnything checkpoint: {checkpoint_path}")
+
+        load_result = model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'), strict=False)
+        missing = getattr(load_result, "missing_keys", [])
+        unexpected = getattr(load_result, "unexpected_keys", [])
+        print(f"DepthAnything load_state_dict: missing={len(missing)} unexpected={len(unexpected)}")
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model.eval()
         return model
         
     elif model_name == MODEL_LIST['METRIC_3D']:
         model = torch.hub.load('yvanyin/metric3d', 'metric3d_vit_small', pretrain=True)
-        model.cuda().eval()
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model.eval()
         return model
     else:
         raise NameError(f"Model {model_name} not supported. Try one of {MODEL_LIST.keys()}")

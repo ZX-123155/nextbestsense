@@ -6,6 +6,26 @@
     <arg name="depth_cam_info_topic" default="/depth_cam_info" />
     <arg name="save_data" default="True" />
     <arg name="should_collect_test_views" default="False" />
+    <arg name="base_frame" default="base_link" />
+    <arg name="ee_link" default="end_effector_link" />
+    <arg name="camera_link" default="camera_link" />
+    <arg name="touch_link" default="touch" />
+    <arg name="camera_color_frame" default="camera_color_frame" />
+    <arg name="camera_depth_frame" default="camera_depth_frame" />
+    <arg name="nbv_wait_timeout_s" default="300.0" />
+    <arg name="gs_max_iterations" default="11000" />
+    <arg name="wait_for_offline_sam2" default="False" />
+    <arg name="offline_sam2_done_flag" default=".offline_sam2_done" />
+    <arg name="reuse_existing_dataset" default="False" />
+    <arg name="existing_dataset_dir" default="/home/ras/NextBestSense/data/2026-04-22-11-36-13" />
+    <arg name="rgb_depth_sync_tolerance_s" default="0.05" />
+    <arg name="rgb_depth_sync_wait_s" default="0.4" />
+    <arg name="uncertainty_object_mask_weight" default="0.0" />
+    <arg name="uncertainty_mask_gamma" default="4.0" />
+    <arg name="uncertainty_bg_floor" default="0.005" />
+    <arg name="uncertainty_fruit_weight" default="1.0" />
+    <arg name="uncertainty_leaf_weight" default="0.4" />
+    <arg name="uncertainty_bg_weight" default="0.02" />
 
     <!-- Launch the example in that namespace -->
     <node name="vision_node" pkg="gaussian_splatting" type="vision_node.py" output="screen">
@@ -15,6 +35,26 @@
         <param name="depth_cam_info_topic" value="$(arg depth_cam_info_topic)"/>
         <param name="save_data" value="$(arg save_data)"/>
         <param name="should_collect_test_views" value="$(arg should_collect_test_views)"/>
+        <param name="base_frame" value="$(arg base_frame)"/>
+        <param name="ee_link" value="$(arg ee_link)"/>
+        <param name="camera_link" value="$(arg camera_link)"/>
+        <param name="touch_link" value="$(arg touch_link)"/>
+        <param name="camera_color_frame" value="$(arg camera_color_frame)"/>
+        <param name="camera_depth_frame" value="$(arg camera_depth_frame)"/>
+        <param name="nbv_wait_timeout_s" value="$(arg nbv_wait_timeout_s)"/>
+        <param name="gs_max_iterations" value="$(arg gs_max_iterations)"/>
+        <param name="wait_for_offline_sam2" value="$(arg wait_for_offline_sam2)"/>
+        <param name="offline_sam2_done_flag" value="$(arg offline_sam2_done_flag)"/>
+        <param name="reuse_existing_dataset" value="$(arg reuse_existing_dataset)"/>
+        <param name="existing_dataset_dir" value="$(arg existing_dataset_dir)"/>
+        <param name="rgb_depth_sync_tolerance_s" value="$(arg rgb_depth_sync_tolerance_s)"/>
+        <param name="rgb_depth_sync_wait_s" value="$(arg rgb_depth_sync_wait_s)"/>
+        <param name="uncertainty_object_mask_weight" value="$(arg uncertainty_object_mask_weight)"/>
+        <param name="uncertainty_mask_gamma" value="$(arg uncertainty_mask_gamma)"/>
+        <param name="uncertainty_bg_floor" value="$(arg uncertainty_bg_floor)"/>
+        <param name="uncertainty_fruit_weight" value="$(arg uncertainty_fruit_weight)"/>
+        <param name="uncertainty_leaf_weight" value="$(arg uncertainty_leaf_weight)"/>
+        <param name="uncertainty_bg_weight" value="$(arg uncertainty_bg_weight)"/>
         <param name="model_param_path" value="/home/user/kinova/NextBestSense/src/gaussian_splatting/gaussian_splatting_py/config.yml"/>
     </node>
 

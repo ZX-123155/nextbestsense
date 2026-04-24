@@ -31,11 +31,24 @@ import geometry_msgs.msg
 from geometry_msgs.msg import Point
 
 
-from voxblox_msgs.srv import FilePathRequest, FilePath
-from voxblox_msgs.srv import QueryTSDFRequest, QueryTSDF
+try:
+  from voxblox_msgs.srv import FilePathRequest, FilePath
+  from voxblox_msgs.srv import QueryTSDFRequest, QueryTSDF
+  VOXBLOX_MSGS_AVAILABLE = True
+except ImportError:
+  FilePathRequest = None
+  FilePath = None
+  QueryTSDFRequest = None
+  QueryTSDF = None
+  VOXBLOX_MSGS_AVAILABLE = False
 from geometry_msgs.msg import PoseStamped, Pose
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2
-from kortex_driver.msg import TwistCommand
+try:
+  from kortex_driver.msg import TwistCommand
+  KORTEX_MSGS_AVAILABLE = True
+except ImportError:
+  TwistCommand = None
+  KORTEX_MSGS_AVAILABLE = False
 import message_filters
 
 from std_srvs.srv import Trigger, TriggerResponse, TriggerRequest, Empty
@@ -56,7 +69,12 @@ if 'tsdf_at' in dir(ScalableTSDFVolume):
 else:
   Open3D_installed = False
   
-from pynput import keyboard
+try:
+  from pynput import keyboard
+  PYNPUT_AVAILABLE = True
+except ImportError:
+  keyboard = None
+  PYNPUT_AVAILABLE = False
 
 TOPVIEW = [0.656, 0.002, 0.434, 0.707, 0.707, 0., 0.]
 OBJECT_CENTER = np.array([0.4, 0., 0.1])
@@ -168,6 +186,21 @@ class TouchGSController(object):
     self.starting_views = int(rospy.get_param("~starting_views", "5"))
     self.added_views = int(rospy.get_param("views_to_add", "10"))
     self.num_touches_to_add = int(rospy.get_param("touches_to_add", "10"))
+    self.base_frame = rospy.get_param("~base_frame", "base_link")
+    self.ee_link = rospy.get_param("~ee_link", "end_effector_link")
+    self.pose_solver_ee_link = rospy.get_param("~pose_solver_ee_link", "tool_frame")
+    self.touch_link = rospy.get_param("~touch_link", "touch")
+    self.home_named_target = rospy.get_param("~home_named_target", "home")
+    self.arm_group_name = rospy.get_param("~arm_group_name", "arm")
+    self.gripper_group_name = rospy.get_param("~gripper_group_name", "gripper")
+    default_object_center = OBJECT_CENTER.tolist()
+    object_center_param = rospy.get_param("~object_center", default_object_center)
+    self.object_center = np.array(object_center_param, dtype=float)
+    self.sample_radius_min = float(rospy.get_param("~sample_radius_min", "0.2"))
+    self.sample_radius_max = float(rospy.get_param("~sample_radius_max", "0.35"))
+    self.max_pose_generation_attempts = int(rospy.get_param("~max_pose_generation_attempts", "300"))
+    default_vel_topic = "/my_gen3/in/cartesian_velocity"
+    self.cartesian_velocity_topic = rospy.get_param("~cartesian_velocity_topic", default_vel_topic)
         
     self.should_collect_experiment = bool(rospy.get_param("~should_collect_experiment", "False"))
     self.use_touch = bool(rospy.get_param("~use_touch", "False"))
@@ -192,10 +225,9 @@ class TouchGSController(object):
       self.degrees_of_freedom = rospy.get_param(rospy.get_namespace() + "degrees_of_freedom", 7)
 
       # Create the MoveItInterface necessary objects
-      arm_group_name = "arm"
       self.robot = moveit_commander.RobotCommander("robot_description")
       self.scene = moveit_commander.PlanningSceneInterface(ns=rospy.get_namespace())
-      self.arm_group = moveit_commander.MoveGroupCommander(arm_group_name, ns=rospy.get_namespace())
+      self.arm_group = moveit_commander.MoveGroupCommander(self.arm_group_name, ns=rospy.get_namespace())
       self.display_trajectory_publisher = rospy.Publisher(rospy.get_namespace() + 'move_group/display_planned_path',
                                                     moveit_msgs.msg.DisplayTrajectory,
                                                     queue_size=20)
@@ -204,18 +236,17 @@ class TouchGSController(object):
       
       box_pose = geometry_msgs.msg.PoseStamped()
       box_pose.pose.orientation.w = 1.0
-      box_pose.pose.position.x = OBJECT_CENTER[0]
-      box_pose.pose.position.y = OBJECT_CENTER[1]
-      box_pose.pose.position.z = OBJECT_CENTER[2]
-      box_pose.header.frame_id = 'base_link'
+      box_pose.pose.position.x = self.object_center[0]
+      box_pose.pose.position.y = self.object_center[1]
+      box_pose.pose.position.z = self.object_center[2]
+      box_pose.header.frame_id = self.base_frame
       box_name = "box"
       # add box to the scene. In the future, resize to object size in GS
       self.scene.add_box(box_name, box_pose, size=BOX_DIMS)
       rospy.loginfo("Added box to the scene")
 
       if self.is_gripper_present:
-        gripper_group_name = "gripper"
-        self.gripper_group = moveit_commander.MoveGroupCommander(gripper_group_name, ns=rospy.get_namespace())
+        self.gripper_group = moveit_commander.MoveGroupCommander(self.gripper_group_name, ns=rospy.get_namespace())
 
       rospy.loginfo("Initializing node in namespace " + rospy.get_namespace())
     except Exception as e:
@@ -227,7 +258,7 @@ class TouchGSController(object):
       
     rospy.loginfo("Initialization done. Generating Poses ...")
 
-    self.pose_generator = RandomPoseGenerator()
+    self.pose_generator = RandomPoseGenerator(base_name=self.base_frame, ee_name=self.pose_solver_ee_link)
     self.num_poses = 10
     
     # wait for vision node service
@@ -299,7 +330,7 @@ class TouchGSController(object):
 
     # get transform from camera to base_link
     try:
-      transform = self.tfBuffer.lookup_transform("base_link", depth_msg.header.frame_id, rospy.Time())
+      transform = self.tfBuffer.lookup_transform(self.base_frame, depth_msg.header.frame_id, rospy.Time())
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
       rospy.logwarn("Fail to lookup transform from camera to base_link")
       return EXECUTION_FAILURE
@@ -324,7 +355,7 @@ class TouchGSController(object):
 
     # get transform from camera to base_link
     try:
-      transform = self.tfBuffer.lookup_transform("base_link", msg.header.frame_id, rospy.Time())
+      transform = self.tfBuffer.lookup_transform(self.base_frame, msg.header.frame_id, rospy.Time())
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
       rospy.logwarn("Fail to lookup transform from camera to base_link")
       return EXECUTION_FAILURE
@@ -483,7 +514,7 @@ class TouchGSController(object):
     """
     pose_msg = PoseStamped()
     # relative to world
-    pose_msg.header.frame_id = "base_link"
+    pose_msg.header.frame_id = self.base_frame
     pose_msg.header.stamp = rospy.Time.now()
 
     # convert R7 to msg
@@ -514,7 +545,10 @@ class TouchGSController(object):
   
   def vel_control(self):
     """ Velocity Control """
-    vel_pub = rospy.Publisher("/my_gen3/in/cartesian_velocity", TwistCommand, queue_size=10)
+    if not KORTEX_MSGS_AVAILABLE:
+      rospy.logwarn("kortex_driver.msg.TwistCommand is unavailable; skipping velocity control.")
+      return False
+    vel_pub = rospy.Publisher(self.cartesian_velocity_topic, TwistCommand, queue_size=10)
     command = TwistCommand()
     # always choose the world frame
     command.reference_frame = 0
@@ -546,7 +580,9 @@ class TouchGSController(object):
     dt_safety_check: If True, when the depth sensor exceeds the threshold, stop the robot
                   disable it when you are sure the sensor is moving away from the object 
     """ 
-    import pdb; pdb.set_trace()
+    if not KORTEX_MSGS_AVAILABLE:
+      rospy.logwarn("kortex_driver.msg.TwistCommand is unavailable; velocity approach is disabled.")
+      return EXECUTION_FAILURE
       
     rospy.loginfo("Starting Velocity Control")
     rospy.loginfo("Move to Start Pose")
@@ -564,7 +600,7 @@ class TouchGSController(object):
         return EXECUTION_FAILURE
     
     # start velocity control
-    vel_pub = rospy.Publisher("/my_gen3/in/cartesian_velocity", TwistCommand, queue_size=10)
+    vel_pub = rospy.Publisher(self.cartesian_velocity_topic, TwistCommand, queue_size=10)
     command = TwistCommand()
     
     rate = rospy.Rate(30)
@@ -699,7 +735,6 @@ class TouchGSController(object):
                            pose[3], pose[4], pose[5], pose[6]])
 
     status = self.vel_approach(pose, start_pose, exec_time=30)
-    import pdb; pdb.set_trace()
     if status == SUCCESS or status == DT_THRESHOLD_EXCEED:
       # TODO Call the Touch Service 
       # get the touch sensor pose now
@@ -725,7 +760,7 @@ class TouchGSController(object):
   def get_aruco_marker_coord(self):
     """ Get Aruco Marker Board Coord in world frame"""
     # go to home pose
-    self.reach_named_position("home")
+    self.reach_named_position(self.home_named_target)
 
     current_pose = self.get_cartesian_pose()
     q_cur = Quaternion(current_pose.orientation.w, current_pose.orientation.x, current_pose.orientation.y, current_pose.orientation.z)
@@ -764,7 +799,7 @@ class TouchGSController(object):
   
     # get camera link to base link
     try:
-      transform = self.tfBuffer.lookup_transform("base_link", img.header.frame_id, rospy.Time())
+      transform = self.tfBuffer.lookup_transform(self.base_frame, img.header.frame_id, rospy.Time())
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
       rospy.logwarn("Fail to lookup transform from camera to base_link")
       return EXECUTION_FAILURE
@@ -871,6 +906,8 @@ class TouchGSController(object):
     if Open3D_installed:
       mesh = self.integrator.extract_triangle_mesh()
     elif service_name in service_list:
+      if not VOXBLOX_MSGS_AVAILABLE:
+        raise ImportError("voxblox_msgs is required for voxblox mesh services. Install voxblox_msgs or use Open3D TSDF path.")
       mesh_filename = "/home/user/Documents/map.ply"
       req = FilePathRequest()
       req.file_path = mesh_filename
@@ -895,6 +932,8 @@ class TouchGSController(object):
       return tsdfs
     
     else:
+      if not VOXBLOX_MSGS_AVAILABLE:
+        raise ImportError("voxblox_msgs is required for /voxblox_node/query_tsdf service.")
       # query the tsdf at the given point
       req = QueryTSDFRequest()
       for p in points:
@@ -1032,7 +1071,7 @@ class TouchGSController(object):
         touch_poses[:3, :3] = R
         touch_poses[:3, 3] = c_w
 
-        ee_poses = self.convert_pose("touch", "base_link", touch_poses)
+        ee_poses = self.convert_pose(self.touch_link, self.base_frame, touch_poses)
         joints = self.pose_generator.calcIK(ee_poses) 
         if joints is None:
           continue
@@ -1063,7 +1102,6 @@ class TouchGSController(object):
 
   def board_demo(self):
     """ Board Demo using Aruco Marker"""
-    import pdb; pdb.set_trace()
     poses = self.get_board_touch_poses()
 
     gaussian_splatting_data_dir = "/home/user/Documents/gs_data"
@@ -1103,34 +1141,33 @@ class TouchGSController(object):
     candidate_joints = []
 
     pose_cnt = 0
-    while pose_cnt < self.num_poses:
-      pose = self.pose_generator.sampleInSphere(OBJECT_CENTER, 0.3, 0.5)
-      joints = self.pose_generator.calcIK(pose) 
+    attempts = 0
+    while pose_cnt < self.num_poses and attempts < self.max_pose_generation_attempts:
+      attempts += 1
+      pose = self.pose_generator.sampleInSphere(self.object_center, self.sample_radius_min, self.sample_radius_max)
+      joints = self.pose_generator.calcIK(pose)
 
-      # plan reaching the pose
-      success = False
-      while not success:
-        try:
-          if joints is None:
-            success = False
-            rospy.logwarn("IK Failed, trying another pose")
-            pose = self.pose_generator.sampleInSphere(OBJECT_CENTER, 0.3, 0.5)
-            joints = self.pose_generator.calcIK(pose) 
-          else:
-            success, trajectory, planning_time, err_code = self.arm_group.plan(joints)
-        except: 
-          success = False
-          rospy.logwarn("Fail to Plan Trajectory")
-          pose = self.pose_generator.sampleInSphere(OBJECT_CENTER, 0.3, 0.5)
-          joints = self.pose_generator.calcIK(pose) 
+      if joints is None:
+        rospy.logwarn_throttle(2.0, "IK Failed, trying another pose")
+        continue
 
-        # if plan succeeds, we can add the pose as valid
-        if success:
-          pose_cnt += 1
+      try:
+        success, trajectory, planning_time, err_code = self.arm_group.plan(joints)
+      except Exception:
+        success = False
+        rospy.logwarn_throttle(2.0, "Fail to Plan Trajectory")
 
-          pose_msg:PoseStamped = self.convertNumpy2PoseStamped(pose)
-          pose_req.poses.append(pose_msg)
-          candidate_joints.append(joints)
+      if success:
+        pose_cnt += 1
+        pose_msg:PoseStamped = self.convertNumpy2PoseStamped(pose)
+        pose_req.poses.append(pose_msg)
+        candidate_joints.append(joints)
+
+    if pose_cnt < self.num_poses:
+      rospy.logwarn(
+        "Only generated {}/{} feasible poses after {} attempts."
+        .format(pose_cnt, self.num_poses, attempts)
+      )
 
     return candidate_joints, pose_req.poses
   
@@ -1228,10 +1265,21 @@ class TouchGSController(object):
 
   def vision_phase(self):
     """ Vision Phase. Starting with a few random views, perform FisherRF to get the next best view """
-    import pdb; pdb.set_trace()
     i = 0
+    empty_candidate_retries = 0
     while i < self.total_views:
       candidate_joints, pose_req = self.get_candidate_joints_and_poses(i)
+
+      if len(candidate_joints) == 0 or len(pose_req.poses) == 0:
+        empty_candidate_retries += 1
+        rospy.logwarn_throttle(2.0, "No feasible candidate poses found; retrying...")
+        if empty_candidate_retries >= 20:
+          rospy.logerr("Too many retries with no feasible IK/plans. Stopping vision phase.")
+          return
+        rospy.sleep(0.1)
+        continue
+
+      empty_candidate_retries = 0
 
       if self.view_type_ids[i] == STARTING_VIEW_ID:
         joints, pose = self.select_starting_view(candidate_joints, pose_req)
@@ -1300,7 +1348,7 @@ class TouchGSController(object):
     
     # get the current pose
     try:
-      transform = self.tfBuffer.lookup_transform("base_link", "touch", rospy.Time())
+      transform = self.tfBuffer.lookup_transform(self.base_frame, self.touch_link, rospy.Time())
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
       rospy.logwarn("Fail to lookup transform from touch to base_link")
       return EXECUTION_FAILURE
@@ -1410,8 +1458,11 @@ class TouchGSController(object):
 
   def run(self):
     """ Run Controller Method to get new views """
-    listener = keyboard.Listener(on_press=self.on_press)
-    listener.start()
+    if PYNPUT_AVAILABLE:
+      listener = keyboard.Listener(on_press=self.on_press)
+      listener.start()
+    else:
+      rospy.logwarn("pynput is not installed; keyboard interrupt shortcut is disabled.")
     
     success = self.is_init_success
     self.delete_test_result_param()
@@ -1419,7 +1470,7 @@ class TouchGSController(object):
     # go home
     if success:
       rospy.loginfo("Reaching Named Target Home...")
-      success &= self.reach_named_position("home")
+      success &= self.reach_named_position(self.home_named_target)
       
     # Board Demo for the touch sensor
     # self.board_demo()

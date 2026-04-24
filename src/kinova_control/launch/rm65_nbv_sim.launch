@@ -1,0 +1,227 @@
+<launch>
+
+    <rosparam file="$(find kinova_control)/config/params.yaml" command="load" />
+
+    <arg name="rvizconfig" default="$(find rm_gazebo)/config/RM65/rviz_gazebo.rviz"/>
+    <arg name="link6_type" default="Link6"/>
+
+    <arg name="base_frame" default="base_link"/>
+    <arg name="ee_link" default="Link6"/>
+    <arg name="pose_solver_ee_link" default="Link6"/>
+    <arg name="touch_link" default="touch"/>
+    <arg name="camera_link" default="ee_camera_optical_frame"/>
+    <arg name="camera_color_frame" default="ee_camera_optical_frame"/>
+    <arg name="camera_depth_frame" default="ee_camera_optical_frame"/>
+
+    <arg name="arm_group_name" default="arm"/>
+    <arg name="gripper_group_name" default="gripper"/>
+    <arg name="home_named_target" default="zero"/>
+
+    <arg name="image_topic" default="/camera/color/image_raw" />
+    <arg name="cam_info_topic" default="/camera/color/camera_info" />
+    <arg name="depth_image_topic" default="/camera/depth/image_rect_raw" />
+    <arg name="depth_cam_info_topic" default="/camera/depth/camera_info" />
+
+    <arg name="save_data" default="True" />
+    <arg name="should_collect_test_views" default="False" />
+    <arg name="should_collect_experiment" default="False" />
+    <arg name="starting_views" default="8"/>
+    <arg name="added_views" default="5"/>
+    <arg name="use_touch" default="False"/>
+    <arg name="sample_radius_min" default="0.25"/>
+    <arg name="sample_radius_max" default="0.40"/>
+    <arg name="max_pose_generation_attempts" default="300"/>
+
+    <arg name="save_data_dir" default="/home/user/NextBestSense/data" />
+    <arg name="gs_data_dir" default="/home/user/Documents./touch-gs-data/bunny_blender_data" />
+
+    <arg name="spawn_object" default="true" />
+    <arg name="object_name" default="target_object" />
+    <arg name="object_sdf_path" default="$(env HOME)/models_gazebo/applewithleaf/model.sdf" />
+    <arg name="object_x" default="0.30" />
+    <arg name="object_y" default="0.0" />
+    <arg name="object_z" default="0.33" />
+    <arg name="object_center_x" default="0.30" />
+    <arg name="object_center_y" default="0.0" />
+    <arg name="object_center_z" default="0.33" />
+    <arg name="object_R" default="0.0" />
+    <arg name="object_P" default="0.0" />
+    <arg name="object_Y" default="0.0" />
+    <arg name="spawn_leaf" default="false" />
+    <arg name="leaf_name" default="target_leaf" />
+    <arg name="leaf_sdf_path" default="$(find kinova_control)/models/leaf_plate/model.sdf" />
+    <arg name="leaf_offset_x" default="-0.09" />
+    <arg name="leaf_offset_y" default="0.0" />
+    <arg name="leaf_offset_z" default="0.02" />
+    <arg name="leaf_x" default="$(eval float(arg('object_x')) + float(arg('leaf_offset_x')))" />
+    <arg name="leaf_y" default="$(eval float(arg('object_y')) + float(arg('leaf_offset_y')))" />
+    <arg name="leaf_z" default="$(eval float(arg('object_z')) + float(arg('leaf_offset_z')))" />
+    <arg name="leaf_R" default="0.0" />
+    <arg name="leaf_P" default="1.57079632679" />
+    <arg name="leaf_Y" default="0.35" />
+    <arg name="spawn_top_leaf" default="false" />
+    <arg name="top_leaf_name" default="target_leaf_top" />
+    <arg name="top_leaf_sdf_path" default="$(arg leaf_sdf_path)" />
+    <arg name="top_leaf_offset_x" default="0.0" />
+    <arg name="top_leaf_offset_y" default="0.0" />
+    <arg name="top_leaf_offset_z" default="0.10" />
+    <arg name="top_leaf_x" default="$(eval float(arg('object_x')) + float(arg('top_leaf_offset_x')))" />
+    <arg name="top_leaf_y" default="$(eval float(arg('object_y')) + float(arg('top_leaf_offset_y')))" />
+    <arg name="top_leaf_z" default="$(eval float(arg('object_z')) + float(arg('top_leaf_offset_z')))" />
+    <arg name="top_leaf_R" default="0.0" />
+    <arg name="top_leaf_P" default="0.0" />
+    <arg name="top_leaf_Y" default="0.0" />
+    <arg name="starting_views_mode" default="semicircle" />
+    <arg name="starting_semicircle_radius" default="0.35" />
+    <arg name="starting_semicircle_phi" default="0.5235987756" />
+    <arg name="starting_semicircle_theta_min" default="-3.14159265359" />
+    <arg name="starting_semicircle_theta_max" default="3.14159265359" />
+    <arg name="require_back_start_view" default="true" />
+    <arg name="require_low_side_start_view" default="true" />
+        <arg name="use_fixed_starting_views" default="false"/>
+        <arg name="fixed_starting_views_path" default="/home/ras/NextBestSense/data/2026-04-22-11-36-13/transforms.json"/>
+        <arg name="fixed_starting_views_count" default="8"/>
+        <arg name="fixed_starting_sensor_link" default="$(arg camera_link)"/>
+        <arg name="fixed_starting_views_strict" default="true"/>
+    <arg name="starting_low_side_phi" default="1.95" />
+    <arg name="strict_required_start_views" default="true" />
+    <arg name="required_anchor_radius_min" default="0.25" />
+    <arg name="required_anchor_radius_max" default="0.40" />
+
+    <arg name="move_max_velocity_scaling" default="0.20" />
+    <arg name="move_max_acceleration_scaling" default="0.20" />
+
+    <arg name="conda_lib_dir" default="/home/ras/miniconda3/envs/touch-gs/lib" />
+    <arg name="nbv_start_step" default="5000"/>
+    <arg name="nbv_interval_steps" default="1000"/>
+    <arg name="nbv_max_rounds" default="5"/>
+    <arg name="nbv_wait_timeout_s" default="300.0"/>
+    <arg name="semantic_guided_nbv" default="true"/>
+    <arg name="nbv_bg_penalty" default="0.2"/>
+    <arg name="nbv_score_weight" default="0.3"/>
+    <arg name="nbv_leaf_weight" default="0.4"/>
+    <arg name="nbv_r_min" default="0.2"/>
+    <arg name="view_selection_method" default="fisher"/>
+    <arg name="use_random_nbv" default="false"/>
+    <arg name="ik_cache_size" default="200"/>
+    <arg name="nbv_min_valid_candidates" default="2"/>
+    <arg name="nbv_candidate_retry_max" default="100"/>
+    <arg name="gs_max_iterations" default="11000"/>
+    <arg name="wait_for_offline_sam2" default="false"/>
+    <arg name="offline_sam2_done_flag" default=".offline_sam2_done"/>
+    <arg name="reuse_existing_dataset" default="false"/>
+    <arg name="existing_dataset_dir" default="/home/ras/initial_dataset/"/>
+    <arg name="rgb_depth_sync_tolerance_s" default="0.05"/>
+    <arg name="rgb_depth_sync_wait_s" default="0.4"/>
+    <arg name="uncertainty_object_mask_weight" default="0.0"/>
+    <arg name="uncertainty_mask_gamma" default="4.0"/>
+    <arg name="uncertainty_bg_floor" default="0.005"/>
+    <arg name="uncertainty_fruit_weight" default="1.0"/>
+    <arg name="uncertainty_leaf_weight" default="0.4"/>
+    <arg name="uncertainty_bg_weight" default="0.02"/>
+
+    <param name="views_to_add" value="$(arg added_views)"/>
+    <param name="nbv_start_step" value="$(arg nbv_start_step)"/>
+    <param name="nbv_interval_steps" value="$(arg nbv_interval_steps)"/>
+    <param name="nbv_max_rounds" value="$(arg nbv_max_rounds)"/>
+    <param name="nbv_wait_timeout_s" value="$(arg nbv_wait_timeout_s)"/>
+    <param name="semantic_guided_nbv" value="$(arg semantic_guided_nbv)"/>
+    <param name="nbv_bg_penalty" value="$(arg nbv_bg_penalty)"/>
+    <param name="nbv_score_weight" value="$(arg nbv_score_weight)"/>
+    <param name="nbv_leaf_weight" value="$(arg nbv_leaf_weight)"/>
+    <param name="nbv_r_min" value="$(arg nbv_r_min)"/>
+    <param name="view_selection_method" value="$(arg view_selection_method)"/>
+    <param name="touches_to_add" value="0"/>
+
+    <include file="$(find rm_gazebo)/launch/arm_65_bringup_moveit.launch" >
+      <arg name="rvizconfig" value="$(arg rvizconfig)" />
+    </include>
+
+    <include file="$(find gaussian_splatting)/launch/vision.launch">
+        <arg name="image_topic" value="$(arg image_topic)"/>
+        <arg name="cam_info_topic" value="$(arg cam_info_topic)"/>
+        <arg name="depth_image_topic" value="$(arg depth_image_topic)"/>
+        <arg name="depth_cam_info_topic" value="$(arg depth_cam_info_topic)"/>
+        <arg name="save_data" value="$(arg save_data)"/>
+        <arg name="should_collect_test_views" value="$(arg should_collect_test_views)"/>
+        <arg name="base_frame" value="$(arg base_frame)"/>
+        <arg name="ee_link" value="$(arg ee_link)"/>
+        <arg name="camera_link" value="$(arg camera_link)"/>
+        <arg name="touch_link" value="$(arg touch_link)"/>
+        <arg name="camera_color_frame" value="$(arg camera_color_frame)"/>
+        <arg name="camera_depth_frame" value="$(arg camera_depth_frame)"/>
+        <arg name="nbv_wait_timeout_s" value="$(arg nbv_wait_timeout_s)"/>
+        <arg name="gs_max_iterations" value="$(arg gs_max_iterations)"/>
+        <arg name="wait_for_offline_sam2" value="$(arg wait_for_offline_sam2)"/>
+        <arg name="offline_sam2_done_flag" value="$(arg offline_sam2_done_flag)"/>
+        <arg name="reuse_existing_dataset" value="$(arg reuse_existing_dataset)"/>
+        <arg name="existing_dataset_dir" value="$(arg existing_dataset_dir)"/>
+        <arg name="rgb_depth_sync_tolerance_s" value="$(arg rgb_depth_sync_tolerance_s)"/>
+        <arg name="rgb_depth_sync_wait_s" value="$(arg rgb_depth_sync_wait_s)"/>
+        <arg name="uncertainty_object_mask_weight" value="$(arg uncertainty_object_mask_weight)"/>
+        <arg name="uncertainty_mask_gamma" value="$(arg uncertainty_mask_gamma)"/>
+        <arg name="uncertainty_bg_floor" value="$(arg uncertainty_bg_floor)"/>
+        <arg name="uncertainty_fruit_weight" value="$(arg uncertainty_fruit_weight)"/>
+        <arg name="uncertainty_leaf_weight" value="$(arg uncertainty_leaf_weight)"/>
+        <arg name="uncertainty_bg_weight" value="$(arg uncertainty_bg_weight)"/>
+    </include>
+
+        <node if="$(arg spawn_object)" name="spawn_nbv_target" pkg="gazebo_ros" type="spawn_model" output="screen"
+                args="-sdf -file $(arg object_sdf_path) -model $(arg object_name) -x $(arg object_x) -y $(arg object_y) -z $(arg object_z) -R $(arg object_R) -P $(arg object_P) -Y $(arg object_Y)"/>
+
+        <node if="$(arg spawn_leaf)" name="spawn_nbv_leaf" pkg="gazebo_ros" type="spawn_model" output="screen"
+            args="-sdf -file $(arg leaf_sdf_path) -model $(arg leaf_name) -x $(arg leaf_x) -y $(arg leaf_y) -z $(arg leaf_z) -R $(arg leaf_R) -P $(arg leaf_P) -Y $(arg leaf_Y)"/>
+
+        <node if="$(arg spawn_top_leaf)" name="spawn_nbv_top_leaf" pkg="gazebo_ros" type="spawn_model" output="screen"
+            args="-sdf -file $(arg top_leaf_sdf_path) -model $(arg top_leaf_name) -x $(arg top_leaf_x) -y $(arg top_leaf_y) -z $(arg top_leaf_z) -R $(arg top_leaf_R) -P $(arg top_leaf_P) -Y $(arg top_leaf_Y)"/>
+
+    <node name="rm65_nbv_controller" pkg="kinova_control" type="rm65_nbv_controller.py" output="screen">
+        <env name="LD_LIBRARY_PATH" value="$(arg conda_lib_dir):$(env LD_LIBRARY_PATH)"/>
+        <param name="starting_views" value="$(arg starting_views)"/>
+        <param name="candidate_views_per_round" value="$(arg added_views)"/>
+        <param name="num_candidate_poses" value="$(arg added_views)"/>
+        <param name="ik_cache_size" value="$(arg ik_cache_size)"/>
+        <param name="nbv_min_valid_candidates" value="$(arg nbv_min_valid_candidates)"/>
+        <param name="nbv_candidate_retry_max" value="$(arg nbv_candidate_retry_max)"/>
+        <param name="nbv_start_step" value="$(arg nbv_start_step)"/>
+        <param name="nbv_interval_steps" value="$(arg nbv_interval_steps)"/>
+        <param name="nbv_max_rounds" value="$(arg nbv_max_rounds)"/>
+        <param name="should_collect_experiment" value="$(arg should_collect_experiment)"/>
+        <param name="dt_deform_threshold_value" value="200"/>
+        <param name="use_touch" value="$(arg use_touch)"/>
+        <param name="sample_radius_min" value="$(arg sample_radius_min)"/>
+        <param name="sample_radius_max" value="$(arg sample_radius_max)"/>
+        <param name="max_pose_generation_attempts" value="$(arg max_pose_generation_attempts)"/>
+        <param name="starting_views_mode" value="$(arg starting_views_mode)"/>
+        <param name="starting_semicircle_radius" value="$(arg starting_semicircle_radius)"/>
+        <param name="starting_semicircle_phi" value="$(arg starting_semicircle_phi)"/>
+        <param name="starting_semicircle_theta_min" value="$(arg starting_semicircle_theta_min)"/>
+        <param name="starting_semicircle_theta_max" value="$(arg starting_semicircle_theta_max)"/>
+            <param name="use_fixed_starting_views" value="$(arg use_fixed_starting_views)"/>
+            <param name="fixed_starting_views_path" value="$(arg fixed_starting_views_path)"/>
+            <param name="fixed_starting_views_count" value="$(arg fixed_starting_views_count)"/>
+            <param name="fixed_starting_sensor_link" value="$(arg fixed_starting_sensor_link)"/>
+            <param name="fixed_starting_views_strict" value="$(arg fixed_starting_views_strict)"/>
+        <param name="require_back_start_view" value="$(arg require_back_start_view)"/>
+        <param name="require_low_side_start_view" value="$(arg require_low_side_start_view)"/>
+        <param name="starting_low_side_phi" value="$(arg starting_low_side_phi)"/>
+        <param name="strict_required_start_views" value="$(arg strict_required_start_views)"/>
+        <param name="required_anchor_radius_min" value="$(arg required_anchor_radius_min)"/>
+        <param name="required_anchor_radius_max" value="$(arg required_anchor_radius_max)"/>
+        <param name="base_frame" value="$(arg base_frame)"/>
+        <param name="ee_link" value="$(arg ee_link)"/>
+        <param name="pose_solver_ee_link" value="$(arg pose_solver_ee_link)"/>
+        <rosparam param="object_center" subst_value="true">[$(arg object_center_x), $(arg object_center_y), $(arg object_center_z)]</rosparam>
+        <param name="touch_link" value="$(arg touch_link)"/>
+        <param name="arm_group_name" value="$(arg arm_group_name)"/>
+        <param name="gripper_group_name" value="$(arg gripper_group_name)"/>
+        <param name="home_named_target" value="$(arg home_named_target)"/>
+        <param name="cartesian_velocity_topic" value="/arm/cartesian_velocity_cmd"/>
+        <param name="move_max_velocity_scaling" value="$(arg move_max_velocity_scaling)"/>
+        <param name="move_max_acceleration_scaling" value="$(arg move_max_acceleration_scaling)"/>
+        <param name="use_random_nbv" value="$(arg use_random_nbv)"/>
+        <param name="reuse_existing_dataset" value="$(arg reuse_existing_dataset)"/>
+        <param name="existing_dataset_dir" value="$(arg existing_dataset_dir)"/>
+    </node>
+
+</launch>

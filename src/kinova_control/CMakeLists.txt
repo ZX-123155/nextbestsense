@@ -159,6 +159,8 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   kinova_control_py/moveit_controller.py
+  kinova_control_py/rm65_nbv_controller.py
+  kinova_control_py/simple_capture.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

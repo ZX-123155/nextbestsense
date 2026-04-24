@@ -2,17 +2,28 @@
 
     <rosparam file="$(find kinova_control)/config/params.yaml" command="load" />
 
-     <!-- Include the touch sensor transform-->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="knova_dtv2" args="0.0 0.0 0.0607 0 0 -0.7071068 0.7071068 end_effector_link touch" />
-
     <!-- Robot namespace -->
     <arg name="robot_name" default="my_gen3"/>
     <arg name="start_delay_seconds" default="0"/>
+    <arg name="base_frame" default="base_link"/>
+    <arg name="ee_link" default="end_effector_link"/>
+    <arg name="pose_solver_ee_link" default="tool_frame"/>
+    <arg name="camera_link" default="ee_camera_optical_frame"/>
+    <arg name="touch_link" default="touch"/>
+    <arg name="camera_color_frame" default="ee_camera_optical_frame"/>
+    <arg name="camera_depth_frame" default="ee_camera_optical_frame"/>
+    <arg name="arm_group_name" default="arm"/>
+    <arg name="gripper_group_name" default="gripper"/>
+    <arg name="home_named_target" default="home"/>
+    <arg name="cartesian_velocity_topic" default="/my_gen3/in/cartesian_velocity"/>
+
+    <!-- Include the touch sensor transform-->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="knova_dtv2" args="0.0 0.0 0.0607 0 0 -0.7071068 0.7071068 $(arg ee_link) $(arg touch_link)" />
 
     <arg name="image_topic" default="/camera/color/image_raw" />
     <arg name="cam_info_topic" default="/camera/color/camera_info" />
 
-    <arg name="depth_image_topic" default="/camera/depth/image_raw" />
+    <arg name="depth_image_topic" default="/camera/depth/image_rect_raw" />
     <arg name="depth_cam_info_topic" default="/camera/depth/camera_info" />
 
     <arg name="save_data" default="True" />
@@ -30,6 +41,12 @@
         <arg name="depth_cam_info_topic" value="$(arg depth_cam_info_topic)"/>
         <arg name="save_data" value="$(arg save_data)"/>
         <arg name="should_collect_test_views" value="$(arg should_collect_test_views)"/>
+        <arg name="base_frame" value="$(arg base_frame)"/>
+        <arg name="ee_link" value="$(arg ee_link)"/>
+        <arg name="camera_link" value="$(arg camera_link)"/>
+        <arg name="touch_link" value="$(arg touch_link)"/>
+        <arg name="camera_color_frame" value="$(arg camera_color_frame)"/>
+        <arg name="camera_depth_frame" value="$(arg camera_depth_frame)"/>
     </include>
 
     <!-- Launch the controller node -->
@@ -39,6 +56,14 @@
         <param name="should_collect_experiment" value="$(arg should_collect_experiment)"/>
         <param name="dt_deform_threshold_value" value="200"/>
         <param name="use_touch" value="$(arg use_touch)"/>
+        <param name="base_frame" value="$(arg base_frame)"/>
+        <param name="ee_link" value="$(arg ee_link)"/>
+        <param name="pose_solver_ee_link" value="$(arg pose_solver_ee_link)"/>
+        <param name="touch_link" value="$(arg touch_link)"/>
+        <param name="arm_group_name" value="$(arg arm_group_name)"/>
+        <param name="gripper_group_name" value="$(arg gripper_group_name)"/>
+        <param name="home_named_target" value="$(arg home_named_target)"/>
+        <param name="cartesian_velocity_topic" value="$(arg cartesian_velocity_topic)"/>
     </node>
 
 </launch>

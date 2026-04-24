@@ -25,15 +25,19 @@ class PoseSolver(object):
     self.fk = PyKDL.ChainFkSolverPos_recursive(self.chain)
     self.ik = PyKDL.ChainIkSolverPos_LMA(self.chain)
     self.JacSolver = PyKDL.ChainJntToJacSolver(self.chain)
+    self.num_joints = self.chain.getNrOfJoints()
 
     self.rng = np.random.default_rng(12345)
 
     # joints, pose, visit count
-    # pre-defined some cache data
-    self.cache_result = [
-      [(-0.1128, -0.2298, -3.0260, -2.0978, 0.0404, -0.99, 1.53), (0.3088, -0.0099, 0.2494, 0.7079, 0.6921, 0.0975, 0.1013), 1],
-      [(-5.9122e-5, 0.2602, 3.1399, -2.2700, 9.6080e-5, 0.9598, 1.5701), (0.6561, 0.0023, 0.4341, 0.4997, 0.5, 0.5, 0.5), 1]
-    ]
+    # pre-defined cache data is only valid for 7-DOF arms
+    if self.num_joints == 7:
+      self.cache_result = [
+        [(-0.1128, -0.2298, -3.0260, -2.0978, 0.0404, -0.99, 1.53), (0.3088, -0.0099, 0.2494, 0.7079, 0.6921, 0.0975, 0.1013), 1],
+        [(-5.9122e-5, 0.2602, 3.1399, -2.2700, 9.6080e-5, 0.9598, 1.5701), (0.6561, 0.0023, 0.4341, 0.4997, 0.5, 0.5, 0.5), 1]
+      ]
+    else:
+      self.cache_result = []
     self.cache_size = cache_size
 
   def calcJac(self, joints) -> np.ndarray:
@@ -159,6 +163,30 @@ class PoseSolver(object):
           self.cache_result[ind][2] += 1
         init_qs.append(init_q)
 
+      # cache seed can be locally trapped; append generic/random seeds as fallback
+      default_q = PyKDL.JntArray(self.chain.getNrOfJoints())
+      for i in range(self.chain.getNrOfJoints()):
+        default_q[i] = 0.0
+      init_qs.append(default_q)
+
+      for _ in range(3):
+        random_q = PyKDL.JntArray(self.chain.getNrOfJoints())
+        for i in range(self.chain.getNrOfJoints()):
+          random_q[i] = float(self.rng.uniform(-pi, pi))
+        init_qs.append(random_q)
+
+    if len(init_qs) == 0:
+      default_q = PyKDL.JntArray(self.chain.getNrOfJoints())
+      for i in range(self.chain.getNrOfJoints()):
+        default_q[i] = 0.0
+      init_qs.append(default_q)
+
+      for _ in range(3):
+        random_q = PyKDL.JntArray(self.chain.getNrOfJoints())
+        for i in range(self.chain.getNrOfJoints()):
+          random_q[i] = float(self.rng.uniform(-pi, pi))
+        init_qs.append(random_q)
+
     # iterate through all cache results
     for init_q in init_qs:
       rospy.loginfo(" Try IK solver with {} results".format(len(init_qs)))
@@ -167,10 +195,14 @@ class PoseSolver(object):
       if ret >= 0:
         joints = np.array([q[i] for i in range(q.rows())])
         
-        cache_joints = np.array([stats[0] for stats in self.cache_result])
-        joint_distance = np.linalg.norm(cache_joints - joints, axis=1)
-        if np.min(joint_distance) > 0.1:
+        valid_cache_joints = [np.array(stats[0]) for stats in self.cache_result if len(stats[0]) == len(joints)]
+        if len(valid_cache_joints) == 0:
           self.__storeCache(joints, pose)
+        else:
+          cache_joints = np.stack(valid_cache_joints, axis=0)
+          joint_distance = np.linalg.norm(cache_joints - joints, axis=1)
+          if np.min(joint_distance) > 0.1:
+            self.__storeCache(joints, pose)
         
         return joints
       
@@ -223,7 +255,7 @@ class RandomPoseGenerator(PoseSolver):
       offset = np.array([radius * np.sin(phi) * np.cos(theta), radius * np.sin(phi) * np.sin(theta), radius * np.cos(phi)])
       pos = center_pos + offset
 
-      # compute the orientation
+      # compute the orientation so the optical axis points toward the object center
       vec_z = -1 * offset / np.linalg.norm(offset)
       
       # y axis is horizontal

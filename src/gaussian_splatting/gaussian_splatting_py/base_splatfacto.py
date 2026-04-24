@@ -12,7 +12,9 @@ class ROSSplatfacto(ABC):
     3D GS model from Nerfstudio. Connects to ROS1
     """
     def __init__(self, data_dir='bunny_blender_dir', render_uncertainty=False,
-                 train_split_fraction=0.5, depth_uncertainty_weight=1.0, rgb_uncertainty_weight=1.0):
+                 train_split_fraction=0.5, depth_uncertainty_weight=1.0, rgb_uncertainty_weight=1.0,
+                 uncertainty_object_mask_weight=0.0, uncertainty_mask_gamma=4.0, uncertainty_bg_floor=0.005,
+                 uncertainty_fruit_weight=1.0, uncertainty_leaf_weight=0.4, uncertainty_bg_weight=0.02):
         """
         initialize Gaussian Splatting
         When the model trains, it will train to 2K steps, then a service will be called to get the list of poses. [GS waits]
@@ -30,6 +32,12 @@ class ROSSplatfacto(ABC):
         self.train_split_fraction = train_split_fraction
         self.depth_uncertainty_weight = depth_uncertainty_weight
         self.rgb_uncertainty_weight = rgb_uncertainty_weight
+        self.uncertainty_object_mask_weight = float(uncertainty_object_mask_weight)
+        self.uncertainty_mask_gamma = float(uncertainty_mask_gamma)
+        self.uncertainty_bg_floor = float(uncertainty_bg_floor)
+        self.uncertainty_fruit_weight = float(uncertainty_fruit_weight)
+        self.uncertainty_leaf_weight = float(uncertainty_leaf_weight)
+        self.uncertainty_bg_weight = float(uncertainty_bg_weight)
         
     
     @abstractmethod

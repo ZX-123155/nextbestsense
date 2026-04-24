@@ -3,6 +3,9 @@ On an RGB image, gets the automatic masks in SAM.
 
 """
 import argparse
+import os
+import os.path as osp
+import sys
 from typing import Union
 import numpy as np
 import torch
@@ -13,11 +16,65 @@ from scipy.optimize import lsq_linear
 # import cvxpy as cp
 
 
+def _find_sam2_repo() -> str:
+    candidates = [
+        os.environ.get("SAM2_REPO_DIR", ""),
+        osp.expanduser("~/sam2"),
+        osp.abspath(osp.join(osp.dirname(osp.abspath(__file__)), "../../../sam2")),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate = osp.abspath(candidate)
+        if osp.isfile(osp.join(candidate, "sam2", "build_sam.py")):
+            return candidate
+    return ""
+
+
+SAM2_REPO_DIR = _find_sam2_repo()
+if SAM2_REPO_DIR and SAM2_REPO_DIR not in sys.path:
+    sys.path.insert(0, SAM2_REPO_DIR)
+
+
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
-SAM2_PATH = "/home/user/segment-anything-2/checkpoints/sam2_hiera_large.pt"
-MODEL_CFG = "sam2_hiera_l.yaml"
+DEFAULT_SAM2_PATH = osp.join(SAM2_REPO_DIR, "checkpoints", "sam2.1_hiera_large.pt") if SAM2_REPO_DIR else ""
+DEFAULT_MODEL_CFG = "configs/sam2.1/sam2.1_hiera_l.yaml"
+SAM2_PATH = os.environ.get("SAM2_CHECKPOINT", DEFAULT_SAM2_PATH)
+MODEL_CFG = os.environ.get("SAM2_MODEL_CFG", DEFAULT_MODEL_CFG)
+
+
+def _normalize_model_cfg(model_cfg: str) -> str:
+    model_cfg = str(model_cfg).strip().replace("\\", "/")
+    if model_cfg.startswith("pkg://"):
+        model_cfg = model_cfg[len("pkg://"):]
+    if model_cfg.startswith("sam2/"):
+        model_cfg = model_cfg[len("sam2/"):]
+    if "/configs/" in model_cfg:
+        model_cfg = model_cfg.split("/configs/", 1)[1]
+        model_cfg = f"configs/{model_cfg}"
+    if model_cfg.startswith("/"):
+        model_cfg = model_cfg.lstrip("/")
+    return model_cfg
+
+
+MODEL_CFG_NAME = _normalize_model_cfg(MODEL_CFG)
+
+
+def _resolve_model_cfg_file(model_cfg_name: str) -> str:
+    candidates = []
+    if SAM2_REPO_DIR:
+        candidates.append(osp.join(SAM2_REPO_DIR, "sam2", model_cfg_name))
+        candidates.append(osp.join(SAM2_REPO_DIR, model_cfg_name))
+    candidates.append(model_cfg_name)
+    for candidate in candidates:
+        if osp.isfile(candidate):
+            return candidate
+    return ""
+
+
+MODEL_CFG_FILE = _resolve_model_cfg_file(MODEL_CFG_NAME)
 
 # use bfloat16
 torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
@@ -35,6 +92,9 @@ def learn_scale_and_offset_raw(dense_depth, sparse_depth):
     dense_depth_valid = dense_depth_flat[valid_mask]
     sparse_depth_valid = sparse_depth_flat[valid_mask]
 
+    if dense_depth_valid.size == 0 or sparse_depth_valid.size == 0:
+        return 1.0, 0.0
+
     A = np.vstack([dense_depth_valid, np.ones_like(dense_depth_valid)]).T
     b = sparse_depth_valid
 
@@ -50,6 +110,9 @@ def learn_scale_and_offset_raw_scale_pos(dense_depth, sparse_depth):
     valid_mask = sparse_depth_flat > 0
     dense_depth_valid = dense_depth_flat[valid_mask]
     sparse_depth_valid = sparse_depth_flat[valid_mask]
+
+    if dense_depth_valid.size == 0 or sparse_depth_valid.size == 0:
+        return 1.0, 0.0
 
     A = np.vstack([dense_depth_valid, np.ones_like(dense_depth_valid)]).T
     b = sparse_depth_valid
@@ -134,7 +197,14 @@ def compute_homography(K, R, t):
 
 class SAM2(SAM2AutomaticMaskGenerator):
     def __init__(self, points_per_side=64, pred_iou_thresh=0.95, use_m2m=False):
-        sam2 = build_sam2(MODEL_CFG, SAM2_PATH, device ='cuda', apply_postprocessing=False)
+        if not osp.isfile(SAM2_PATH):
+            raise FileNotFoundError(f"SAM2 checkpoint not found: {SAM2_PATH}. Set SAM2_CHECKPOINT or SAM2_REPO_DIR.")
+        if not MODEL_CFG_FILE:
+            raise FileNotFoundError(
+                f"SAM2 model cfg not found for '{MODEL_CFG}' (normalized: '{MODEL_CFG_NAME}'). "
+                "Set SAM2_MODEL_CFG or SAM2_REPO_DIR."
+            )
+        sam2 = build_sam2(MODEL_CFG_NAME, SAM2_PATH, device ='cuda', apply_postprocessing=False)
         # build sam2 with points and iou threshold
         super().__init__(sam2, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh, use_m2m=use_m2m)
         print("SAM2 initialized.")
@@ -160,7 +230,10 @@ class SAM2(SAM2AutomaticMaskGenerator):
         real_depth = cv2.imread(real_depth, cv2.IMREAD_UNCHANGED) / 1000.0
         # get difference between the two depths' filtered 0s
         sparse_mask = real_depth > 0
-        diff = np.mean(np.abs(mde_depth[sparse_mask] - real_depth[sparse_mask]))
+        if np.any(sparse_mask):
+            diff = np.mean(np.abs(mde_depth[sparse_mask] - real_depth[sparse_mask]))
+        else:
+            diff = float("nan")
         print(f"Diff: {diff}")
         
         results = super().generate(image)
@@ -203,25 +276,34 @@ class SAM2(SAM2AutomaticMaskGenerator):
             
             scale, offset = learn_scale_and_offset_raw(old_mde_mask, real_mask)
             mask = cv2.imread(object_mask_path, cv2.IMREAD_UNCHANGED)
-            mask = mask.astype(bool)
-            mde_depth[mask] = old_mde_depth[mask] * scale + offset
-            mde_depth[mde_depth < 0] = 0
+            if mask is None:
+                print(f"[WARN] object mask not found: {object_mask_path}; skip challenge-object refinement")
+            else:
+                mask = mask.astype(bool)
+                mde_depth[mask] = old_mde_depth[mask] * scale + offset
+                mde_depth[mde_depth < 0] = 0
             
         if object_mask_path is not None and not is_challenge_object:
             mask = cv2.imread(object_mask_path, cv2.IMREAD_UNCHANGED)
-            mask = mask.astype(bool)
+            if mask is None:
+                print(f"[WARN] object mask not found: {object_mask_path}; skip object-mask refinement")
+                mask = None
             old_mde_depth = cv2.imread(original_mde_depth_path, cv2.IMREAD_UNCHANGED) / 1000.0
             
-            # get median point of the mask
-            mask = mask.astype(bool)
+            if mask is not None:
+                # get median point of the mask
+                mask = mask.astype(bool)
+                
+                old_mde_mask = old_mde_depth[mask]
+                real_mask = real_depth[mask]
+                scale, offset = learn_scale_and_offset_raw_scale_pos(old_mde_mask, real_mask)
+                mde_depth[mask] = old_mde_depth[mask] * scale + offset
+                mde_depth[mde_depth < 0] = 0
             
-            old_mde_mask = old_mde_depth[mask]
-            real_mask = real_depth[mask]
-            scale, offset = learn_scale_and_offset_raw_scale_pos(old_mde_mask, real_mask)
-            mde_depth[mask] = old_mde_depth[mask] * scale + offset
-            mde_depth[mde_depth < 0] = 0
-            
-        diff = np.mean(np.abs(mde_depth[sparse_mask] - real_depth[sparse_mask]))
+        if np.any(sparse_mask):
+            diff = np.mean(np.abs(mde_depth[sparse_mask] - real_depth[sparse_mask]))
+        else:
+            diff = float("nan")
         
         img_diff = np.abs(mde_depth - real_depth)
         # set values of sparse mask to 0 in img_diff

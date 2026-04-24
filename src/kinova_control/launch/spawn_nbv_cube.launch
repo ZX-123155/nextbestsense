@@ -1,0 +1,13 @@
+<launch>
+  <arg name="object_name" default="target_object" />
+  <arg name="object_sdf_path" default="$(env HOME)/models_gazebo/apple_41/model.sdf" />
+  <arg name="object_x" default="0.55" />
+  <arg name="object_y" default="0.0" />
+  <arg name="object_z" default="0.15" />
+  <arg name="object_R" default="0.0" />
+  <arg name="object_P" default="0.0" />
+  <arg name="object_Y" default="0.0" />
+
+  <node name="spawn_nbv_target" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-sdf -file $(arg object_sdf_path) -model $(arg object_name) -x $(arg object_x) -y $(arg object_y) -z $(arg object_z) -R $(arg object_R) -P $(arg object_P) -Y $(arg object_Y)" />
+</launch>

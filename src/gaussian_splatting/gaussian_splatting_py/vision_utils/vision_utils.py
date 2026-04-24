@@ -92,6 +92,9 @@ def learn_scale_and_offset_raw(dense_depth, sparse_depth):
     dense_depth_valid = dense_depth_flat[valid_mask]
     sparse_depth_valid = sparse_depth_flat[valid_mask]
 
+    if dense_depth_valid.size == 0 or sparse_depth_valid.size == 0:
+        return 1.0, 0.0
+
     A = np.vstack([dense_depth_valid, np.ones_like(dense_depth_valid)]).T
     b = sparse_depth_valid
 
