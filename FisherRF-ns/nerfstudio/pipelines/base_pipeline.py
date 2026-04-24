@@ -659,9 +659,13 @@ class VanillaPipeline(Pipeline):
                 return
 
             uncertainty_raw = unc_maps[0].detach().float().cpu().numpy()
+            uncertainty_raw_log = np.log1p(np.clip(uncertainty_raw, a_min=0.0, a_max=None))
             h, w = uncertainty_raw.shape[:2]
-            uncertainty_raw_heatmap = uncertainty_raw.copy()
+            uncertainty_raw_heatmap = uncertainty_raw_log.copy()
             uncertainty_weighted = uncertainty_raw_heatmap.copy()
+            bg_scale = np.float32(float(getattr(self.model.config, "uncertainty_bg_weight", self.nbv_score_weight)))  # type: ignore
+            leaf_scale = np.float32(float(getattr(self.model.config, "uncertainty_leaf_weight", 0.25)))  # type: ignore
+            fruit_scale = np.float32(float(getattr(self.model.config, "uncertainty_fruit_weight", 1.0)))  # type: ignore
 
             fruit_gate = np.zeros((h, w), dtype=np.float32)
             leaf_gate = np.zeros((h, w), dtype=np.float32)
@@ -678,14 +682,15 @@ class VanillaPipeline(Pipeline):
                 leaf_gate = (np.abs(sem_np.astype(np.float32) - leaf_value) <= tol).astype(np.float32)
                 leaf_gate = leaf_gate * (1.0 - fruit_gate)
 
-            uncertainty_leaf_weighted = uncertainty_raw_heatmap * leaf_gate
-            uncertainty_fruit_weighted = uncertainty_raw_heatmap * fruit_gate
-            uncertainty_weighted = self._compose_leafreplace_raw_heatmap(
-                raw_heatmap=uncertainty_raw_heatmap,
-                leaf_heatmap=uncertainty_leaf_weighted,
+            bg_gate = np.clip(1.0 - fruit_gate - leaf_gate, 0.0, 1.0).astype(np.float32)
+            uncertainty_fruit_weighted = uncertainty_raw_heatmap * fruit_gate * fruit_scale
+            uncertainty_leaf_weighted = uncertainty_raw_heatmap * leaf_gate * leaf_scale
+            # Apply semantic-region weights in log space so semantic-weighted map diverges from raw map.
+            uncertainty_weighted = uncertainty_raw_heatmap * (
+                fruit_scale * fruit_gate + leaf_scale * leaf_gate + bg_scale * bg_gate
             )
 
-            ref_vis = np.log1p(np.clip(uncertainty_raw, a_min=0.0, a_max=None))
+            ref_vis = uncertainty_raw_heatmap
             ref_pos = ref_vis[ref_vis > 0]
             if ref_pos.size > 0:
                 vis_low = float(np.percentile(ref_pos, 5.0))
@@ -694,10 +699,10 @@ class VanillaPipeline(Pipeline):
                 vis_low = 0.0
                 vis_high = 1.0
 
-            self._save_nbv_heatmap(uncertainty_raw_heatmap, round_idx, new_view_idx, False, "uncertainty_raw_heatmap_realmask", vis_low, vis_high)
-            self._save_nbv_heatmap(uncertainty_weighted, round_idx, new_view_idx, False, "uncertainty_semantic_weighted_heatmap_realmask", vis_low, vis_high)
-            self._save_nbv_heatmap(uncertainty_leaf_weighted, round_idx, new_view_idx, False, "uncertainty_leaf_weighted_realmask", vis_low, vis_high)
-            self._save_nbv_heatmap(uncertainty_fruit_weighted, round_idx, new_view_idx, False, "uncertainty_fruit_weighted_realmask", vis_low, vis_high)
+            self._save_nbv_heatmap(np.expm1(np.clip(uncertainty_raw_heatmap, a_min=0.0, a_max=None)), round_idx, new_view_idx, False, "uncertainty_raw_heatmap_realmask", vis_low, vis_high)
+            self._save_nbv_heatmap(np.expm1(np.clip(uncertainty_weighted, a_min=0.0, a_max=None)), round_idx, new_view_idx, False, "uncertainty_semantic_weighted_heatmap_realmask", vis_low, vis_high)
+            self._save_nbv_heatmap(np.expm1(np.clip(uncertainty_leaf_weighted, a_min=0.0, a_max=None)), round_idx, new_view_idx, False, "uncertainty_leaf_weighted_realmask", vis_low, vis_high)
+            self._save_nbv_heatmap(np.expm1(np.clip(uncertainty_fruit_weighted, a_min=0.0, a_max=None)), round_idx, new_view_idx, False, "uncertainty_fruit_weighted_realmask", vis_low, vis_high)
         except Exception as exc:
             rospy.logwarn(f"Failed to generate real-mask weighted uncertainty maps: {exc}")
     
@@ -896,30 +901,29 @@ class VanillaPipeline(Pipeline):
                 )  # type: ignore
                 if unc_maps is not None and len(unc_maps) > 0:
                     uncertainty_raw = unc_maps[0].detach().float().cpu().numpy()
-                    uncertainty_raw_heatmap = uncertainty_raw.copy()
-                    uncertainty_weighted = uncertainty_raw.copy()
-                    uncertainty_leaf_weighted = uncertainty_raw.copy()
-                    uncertainty_fruit_weighted = uncertainty_raw.copy()
-
+                    uncertainty_raw_log = np.log1p(np.clip(uncertainty_raw, a_min=0.0, a_max=None))
                     bg_scale = np.float32(float(getattr(self.model.config, "uncertainty_bg_weight", self.nbv_score_weight)))  # type: ignore
                     leaf_scale = np.float32(float(getattr(self.model.config, "uncertainty_leaf_weight", 0.25)))  # type: ignore
                     fruit_scale = np.float32(float(getattr(self.model.config, "uncertainty_fruit_weight", 1.0)))  # type: ignore
 
-                    # 1) Base map: suppress background first, keep ROI high.
+                    # 1) Base: suppress non-ROI (background) with bg_scale; ROI remains full scale.
                     if selected_roi_mask is not None:
                         roi_values = selected_roi_mask.to(dtype=torch.float32)
                         roi_prob_heatmap = self._build_alpha_blend_ig_heatmap(selected_cam, roi_values)
                         if roi_prob_heatmap is not None:
                             roi_gate = np.clip(roi_prob_heatmap.astype(np.float32), 0.0, 1.0)
-                            uncertainty_raw_heatmap = uncertainty_raw * (bg_scale + (np.float32(1.0) - bg_scale) * roi_gate)
-                            uncertainty_weighted = uncertainty_raw_heatmap.copy()
+                            base = uncertainty_raw_log * (bg_scale + (np.float32(1.0) - bg_scale) * roi_gate)
                         else:
-                            uncertainty_weighted = uncertainty_raw * bg_scale
+                            base = uncertainty_raw_log * bg_scale
                     else:
-                        uncertainty_raw_heatmap = uncertainty_raw * bg_scale
-                        uncertainty_weighted = uncertainty_raw_heatmap.copy()
+                        base = uncertainty_raw_log * bg_scale
 
-                    # 2) Apply leaf down-weight and produce class-isolated maps.
+                    uncertainty_raw_heatmap = base.copy()
+                    uncertainty_weighted = base.copy()
+                    uncertainty_leaf_weighted = base.copy()
+                    uncertainty_fruit_weighted = base.copy()
+
+                    # 2) On `base`, apply per-class multipliers (fruit / leaf / semantic background).
                     has_semantic_parts = hasattr(self.model, "gauss_params") and (
                         "sam_mask_fruit" in getattr(self.model, "gauss_params")
                         and "sam_mask_leaf" in getattr(self.model, "gauss_params")
@@ -964,15 +968,16 @@ class VanillaPipeline(Pipeline):
                             leaf_gate_raw = np.clip(leaf_gate_raw * leaf_bin.astype(np.float32), 0.0, 1.0)
                             # Fruit has priority on overlap; leaf uses remaining probability mass.
                             leaf_gate = np.clip(leaf_gate_raw * (1.0 - fruit_gate), 0.0, 1.0)
+                            # Neither fruit nor leaf: semantic background (optional extra down-weight in semantic map).
+                            sem_bg = np.clip(1.0 - fruit_gate - leaf_gate, 0.0, 1.0).astype(np.float32)
+                            # raw_heatmap: fruit+leaf both scaled by fruit_scale; other pixels keep `base` (already ROI/BG suppressed)
+                            uncertainty_raw_heatmap = base * (fruit_scale * (fruit_gate + leaf_gate) + sem_bg)
+                            # semantic_weighted: fruit * fruit_w, leaf * leaf_w, semantic bg * bg_w
+                            uncertainty_weighted = base * (fruit_scale * fruit_gate + leaf_scale * leaf_gate + bg_scale * sem_bg)
+                            uncertainty_fruit_weighted = base * fruit_gate * fruit_scale
+                            uncertainty_leaf_weighted = base * leaf_gate * leaf_scale
 
-                            uncertainty_fruit_weighted = uncertainty_raw_heatmap * fruit_gate * fruit_scale
-                            uncertainty_leaf_weighted = uncertainty_raw_heatmap * leaf_gate
-                            uncertainty_weighted = self._compose_leafreplace_raw_heatmap(
-                                raw_heatmap=uncertainty_raw_heatmap,
-                                leaf_heatmap=uncertainty_leaf_weighted,
-                            )
-
-                    ref_vis = np.log1p(np.clip(uncertainty_raw, a_min=0.0, a_max=None))
+                    ref_vis = uncertainty_raw_log
                     ref_pos = ref_vis[ref_vis > 0]
                     if ref_pos.size > 0:
                         vis_low = float(np.percentile(ref_pos, 5.0))
@@ -983,7 +988,7 @@ class VanillaPipeline(Pipeline):
 
                     round_idx = int(self.added_touches_so_far) + 1 if camera_info is not None else int(self.added_views_so_far) + 1
                     self._save_nbv_heatmap(
-                        uncertainty_raw_heatmap,
+                        np.expm1(np.clip(uncertainty_raw_heatmap, a_min=0.0, a_max=None)),
                         round_idx,
                         selected_idx,
                         bool(camera_info is not None),
@@ -992,7 +997,7 @@ class VanillaPipeline(Pipeline):
                         vis_high=vis_high,
                     )
                     self._save_nbv_heatmap(
-                        uncertainty_weighted,
+                        np.expm1(np.clip(uncertainty_weighted, a_min=0.0, a_max=None)),
                         round_idx,
                         selected_idx,
                         bool(camera_info is not None),
@@ -1001,7 +1006,7 @@ class VanillaPipeline(Pipeline):
                         vis_high=vis_high,
                     )
                     self._save_nbv_heatmap(
-                        uncertainty_leaf_weighted,
+                        np.expm1(np.clip(uncertainty_leaf_weighted, a_min=0.0, a_max=None)),
                         round_idx,
                         selected_idx,
                         bool(camera_info is not None),
@@ -1010,7 +1015,7 @@ class VanillaPipeline(Pipeline):
                         vis_high=vis_high,
                     )
                     self._save_nbv_heatmap(
-                        uncertainty_fruit_weighted,
+                        np.expm1(np.clip(uncertainty_fruit_weighted, a_min=0.0, a_max=None)),
                         round_idx,
                         selected_idx,
                         bool(camera_info is not None),
