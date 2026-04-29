@@ -20,12 +20,12 @@
     <arg name="existing_dataset_dir" default="/home/ras/NextBestSense/data/2026-04-22-11-36-13" />
     <arg name="rgb_depth_sync_tolerance_s" default="0.05" />
     <arg name="rgb_depth_sync_wait_s" default="0.4" />
-    <arg name="uncertainty_object_mask_weight" default="0.0" />
-    <arg name="uncertainty_mask_gamma" default="4.0" />
-    <arg name="uncertainty_bg_floor" default="0.005" />
+    <arg name="uncertainty_object_mask_weight" default="0.25" />
+    <arg name="uncertainty_mask_gamma" default="2.0" />
+    <arg name="uncertainty_bg_floor" default="0.03" />
     <arg name="uncertainty_fruit_weight" default="1.0" />
-    <arg name="uncertainty_leaf_weight" default="0.4" />
-    <arg name="uncertainty_bg_weight" default="0.02" />
+    <arg name="uncertainty_leaf_weight" default="0.55" />
+    <arg name="uncertainty_bg_weight" default="0.10" />
 
     <!-- Launch the example in that namespace -->
     <node name="vision_node" pkg="gaussian_splatting" type="vision_node.py" output="screen">

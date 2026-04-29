@@ -13,8 +13,8 @@ class ROSSplatfacto(ABC):
     """
     def __init__(self, data_dir='bunny_blender_dir', render_uncertainty=False,
                  train_split_fraction=0.5, depth_uncertainty_weight=1.0, rgb_uncertainty_weight=1.0,
-                 uncertainty_object_mask_weight=0.0, uncertainty_mask_gamma=4.0, uncertainty_bg_floor=0.005,
-                 uncertainty_fruit_weight=1.0, uncertainty_leaf_weight=0.4, uncertainty_bg_weight=0.02):
+                 uncertainty_object_mask_weight=0.25, uncertainty_mask_gamma=2.0, uncertainty_bg_floor=0.03,
+                 uncertainty_fruit_weight=1.0, uncertainty_leaf_weight=0.55, uncertainty_bg_weight=0.10):
         """
         initialize Gaussian Splatting
         When the model trains, it will train to 2K steps, then a service will be called to get the list of poses. [GS waits]

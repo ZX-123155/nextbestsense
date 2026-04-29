@@ -307,6 +307,8 @@ class VanillaPipeline(Pipeline):
         self.nbv_leaf_weight = float(rospy.get_param('nbv_leaf_weight', 0.25)) # type: ignore
         self.nbv_r_min = float(rospy.get_param('nbv_r_min', 0.2)) # type: ignore
         self.nbv_min_valid_candidates = int(rospy.get_param('nbv_min_valid_candidates', 2)) # type: ignore
+        # Per-Gaussian fruit/leaf/bg split for IG metrics (two sigmoid heads); default 0.5
+        self.nbv_ig_semantic_tau = float(rospy.get_param("nbv_ig_semantic_tau", 0.5))  # type: ignore
         self.nbv_ig_history: List[Dict[str, Any]] = []
         
         self.touches_to_add = int(rospy.get_param('touches_to_add', 5)) # type: ignore
@@ -664,7 +666,7 @@ class VanillaPipeline(Pipeline):
             uncertainty_raw_heatmap = uncertainty_raw_log.copy()
             uncertainty_weighted = uncertainty_raw_heatmap.copy()
             bg_scale = np.float32(float(getattr(self.model.config, "uncertainty_bg_weight", self.nbv_score_weight)))  # type: ignore
-            leaf_scale = np.float32(float(getattr(self.model.config, "uncertainty_leaf_weight", 0.25)))  # type: ignore
+            leaf_scale = np.float32(float(getattr(self.model.config, "uncertainty_leaf_weight", 0.55)))  # type: ignore
             fruit_scale = np.float32(float(getattr(self.model.config, "uncertainty_fruit_weight", 1.0)))  # type: ignore
 
             fruit_gate = np.zeros((h, w), dtype=np.float32)
@@ -768,7 +770,7 @@ class VanillaPipeline(Pipeline):
             is_touch = camera_info is not None
             use_object_mask = self.semantic_guided_nbv or is_touch
             
-            cur_H: torch.tensor = self.compute_hessian(
+            Hx_per_gaussian: torch.tensor = self.compute_hessian(
                 cam,
                 rgb_weight,
                 depth_weight,
@@ -776,47 +778,67 @@ class VanillaPipeline(Pipeline):
                 use_object_mask=use_object_mask,
                 object_mask_weight=self.nbv_bg_penalty,
             ) # type: ignore
-            I_acq = cur_H
-            contrib = I_acq * I_train
+            # score = Sum_all(H_x * I_train), aligned with compute_EIG: sum(H^-1 ∘ H_candidate)
+            # Hx_per_gaussian: already dynamically weighted inside compute_diag_H_rgb_depth (fruit delta or SAM ROI).
+            contrib = Hx_per_gaussian * I_train
             acq_scores[idx] = torch.sum(contrib).item()
 
-            ig_roi = float(torch.sum(contrib).item())
+            ig_roi = 0.0
             ig_leaf = 0.0
             ig_bg = 0.0
             roi_mask_tensor = None
-            if use_object_mask and hasattr(self.model, "sam_mask") and getattr(self.model, "sam_mask") is not None:
+            Hx = Hx_per_gaussian
+            gauss_params_gp = getattr(self.model, "gauss_params", None)
+            has_semantic_gauss_masks = gauss_params_gp is not None and (
+                "sam_mask_fruit" in gauss_params_gp and "sam_mask_leaf" in gauss_params_gp
+            )
+
+            # Fruit / leaf metrics use per-Gaussian heads only — do NOT require `sam_mask` (SAM2 object scalar).
+            # Mutually exclusive 3-way split: if only `fruit>0.5` is used, sigmoid can saturate every Gaussian as
+            # "fruit" so `~fruit` is empty and IG_bg stays 0 — wrong vs image masks.
+            if has_semantic_gauss_masks:
+                tau = float(max(1e-6, min(1.0 - 1e-6, getattr(self, "nbv_ig_semantic_tau", 0.5))))
+                fruit_prob = torch.sigmoid(gauss_params_gp["sam_mask_fruit"].detach()).squeeze(-1)
+                leaf_prob = torch.sigmoid(gauss_params_gp["sam_mask_leaf"].detach()).squeeze(-1)
+                bg_dom = (fruit_prob < tau) & (leaf_prob < tau)
+                fruit_dom = (~bg_dom) & (fruit_prob >= leaf_prob)
+                leaf_dom = (~bg_dom) & (leaf_prob > fruit_prob)
+                non_fruit_dom = ~fruit_dom
+                ig_fruit = float(torch.sum(Hx[fruit_dom]).item()) if bool(fruit_dom.any()) else 0.0
+                ig_leaf = float(torch.sum(Hx[leaf_dom]).item()) if bool(leaf_dom.any()) else 0.0
+                ig_bg = float(torch.sum(Hx[non_fruit_dom]).item()) if bool(non_fruit_dom.any()) else 0.0
+                ig_roi = ig_fruit
+                r_ratio = ig_fruit / (ig_fruit + ig_bg + 1e-12)
+                roi_mask_tensor = fruit_dom | leaf_dom
+                if idx == 0:
+                    n = fruit_prob.numel()
+                    rospy.loginfo(
+                        "NBV IG Gaussian partition tau=%.3f: fruit=%d leaf=%d bg=%d nonfruit=%d / N=%d",
+                        tau,
+                        int(fruit_dom.sum().item()),
+                        int(leaf_dom.sum().item()),
+                        int(bg_dom.sum().item()),
+                        int(non_fruit_dom.sum().item()),
+                        n,
+                    )
+            elif use_object_mask and hasattr(self.model, "sam_mask") and getattr(self.model, "sam_mask") is not None:
                 sam_masks_prob = torch.sigmoid(getattr(self.model, "sam_mask").detach())
                 if sam_masks_prob.ndim > 1:
                     sam_masks_prob = sam_masks_prob.squeeze(-1)
                 roi_mask_tensor = sam_masks_prob > 0.5
-                has_semantic_parts = hasattr(self.model, "gauss_params") and (
-                    "sam_mask_fruit" in getattr(self.model, "gauss_params")
-                    and "sam_mask_leaf" in getattr(self.model, "gauss_params")
-                )
-                if has_semantic_parts:
-                    fruit_prob = torch.sigmoid(getattr(self.model, "gauss_params")["sam_mask_fruit"].detach()).squeeze(-1)
-                    leaf_prob = torch.sigmoid(getattr(self.model, "gauss_params")["sam_mask_leaf"].detach()).squeeze(-1)
-                    fruit_mask = fruit_prob > 0.5
-                    leaf_mask = (leaf_prob > 0.5) & (~fruit_mask)
-                    bg_mask = ~(fruit_mask | leaf_mask)
-                    ig_fruit = float(torch.sum(contrib[fruit_mask]).item()) if bool(fruit_mask.any()) else 0.0
-                    ig_leaf = float(torch.sum(contrib[leaf_mask]).item()) if bool(leaf_mask.any()) else 0.0
-                    ig_bg = float(torch.sum(contrib[bg_mask]).item()) if bool(bg_mask.any()) else 0.0
-                    ig_roi = ig_fruit + float(self.nbv_leaf_weight) * ig_leaf
-                    r_ratio = ig_fruit / (ig_fruit + ig_leaf + ig_bg + 1e-12)
+                bg_mask = ~roi_mask_tensor
+                if bool(roi_mask_tensor.any()):
+                    ig_roi = float(torch.sum(Hx[roi_mask_tensor]).item())
                 else:
-                    bg_mask = ~roi_mask_tensor
-                    if bool(roi_mask_tensor.any()):
-                        ig_roi = float(torch.sum(contrib[roi_mask_tensor]).item())
-                    else:
-                        ig_roi = 0.0
-                    if bool(bg_mask.any()):
-                        ig_bg = float(torch.sum(contrib[bg_mask]).item())
-                    else:
-                        ig_bg = 0.0
-                    r_ratio = ig_roi / (ig_roi + ig_bg + 1e-12)
-            else:
+                    ig_roi = 0.0
+                if bool(bg_mask.any()):
+                    ig_bg = float(torch.sum(Hx[bg_mask]).item())
+                else:
+                    ig_bg = 0.0
                 r_ratio = ig_roi / (ig_roi + ig_bg + 1e-12)
+            else:
+                ig_roi = float(torch.sum(Hx_per_gaussian).item())
+                r_ratio = 1.0 if ig_roi >= 1e-12 else 0.0
             ig_view_metrics.append(
                 {
                     "view_idx": int(idx),
@@ -837,23 +859,15 @@ class VanillaPipeline(Pipeline):
                 }
             )
 
-        # ROI-prioritized scoring with background penalty:
-        # 1) Filter candidates with low ROI ratio (R < nbv_r_min)
-        # 2) Score with S = (1 - nbv_score_weight) * IG_roi + nbv_score_weight * IG_bg
+        # Per-candidate score is Sum_all(Hx_per_gaussian * I_train) (same structure as model EIG[i]).
+        # Only penalize candidates with low ROI ratio (R < nbv_r_min); no ROI/background score mixing.
         filtered_penalty = -1e12
-        semantic_scores: List[float] = []
-        for item in ig_view_metrics:
-            ig_roi = float(item["ig_roi"])
-            ig_bg = float(item["ig_bg"])
+        selection_scores = acq_scores.clone()
+        for idx, item in enumerate(ig_view_metrics):
             r_ratio = float(item["r"])
-
             if r_ratio < self.nbv_r_min:
-                score = filtered_penalty
-            else:
-                score = float((1.0 - self.nbv_score_weight) * ig_roi + self.nbv_score_weight * ig_bg)
-
-            item["score"] = score
-            semantic_scores.append(score)
+                selection_scores[idx] = filtered_penalty
+            item["score"] = float(selection_scores[idx].item())
 
         valid_candidates = [item for item in ig_view_metrics if float(item["r"]) >= float(self.nbv_r_min)]
         if len(valid_candidates) < int(self.nbv_min_valid_candidates):
@@ -874,12 +888,7 @@ class VanillaPipeline(Pipeline):
             )
             return None, []
 
-        acq_scores = torch.tensor(
-            semantic_scores,
-            device=cur_H.device if isinstance(cur_H, torch.Tensor) else None,
-            dtype=torch.float32,
-        )
-        top_idx = int(torch.argmax(acq_scores).item())
+        top_idx = int(torch.argmax(selection_scores).item())
         
         selected_idx = int(top_idx)
         print('Selected views:', selected_idx)
@@ -903,7 +912,7 @@ class VanillaPipeline(Pipeline):
                     uncertainty_raw = unc_maps[0].detach().float().cpu().numpy()
                     uncertainty_raw_log = np.log1p(np.clip(uncertainty_raw, a_min=0.0, a_max=None))
                     bg_scale = np.float32(float(getattr(self.model.config, "uncertainty_bg_weight", self.nbv_score_weight)))  # type: ignore
-                    leaf_scale = np.float32(float(getattr(self.model.config, "uncertainty_leaf_weight", 0.25)))  # type: ignore
+                    leaf_scale = np.float32(float(getattr(self.model.config, "uncertainty_leaf_weight", 0.55)))  # type: ignore
                     fruit_scale = np.float32(float(getattr(self.model.config, "uncertainty_fruit_weight", 1.0)))  # type: ignore
 
                     # 1) Base: suppress non-ROI (background) with bg_scale; ROI remains full scale.

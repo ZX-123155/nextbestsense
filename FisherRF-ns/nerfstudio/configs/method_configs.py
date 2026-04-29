@@ -677,12 +677,12 @@ method_configs["depth-splatfacto"] = TrainerConfig(
         ),
         model=DepthSplatfactoModelConfig(
             learn_semantic_parts=True,
-            uncertainty_object_mask_weight=0.0,
-            uncertainty_mask_gamma=6.0,
-            uncertainty_bg_floor=0.005,
+            uncertainty_object_mask_weight=0.25,
+            uncertainty_mask_gamma=2.0,
+            uncertainty_bg_floor=0.03,
             uncertainty_fruit_weight=1.0,
-            uncertainty_leaf_weight=0.25,
-            uncertainty_bg_weight=0.02,
+            uncertainty_leaf_weight=0.55,
+            uncertainty_bg_weight=0.10,
         ),
     ),
     optimizers={

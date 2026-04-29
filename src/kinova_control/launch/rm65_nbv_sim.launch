@@ -106,19 +106,19 @@
     <arg name="ik_cache_size" default="200"/>
     <arg name="nbv_min_valid_candidates" default="2"/>
     <arg name="nbv_candidate_retry_max" default="100"/>
-    <arg name="gs_max_iterations" default="11000"/>
+    <arg name="gs_max_iterations" default="10000"/>
     <arg name="wait_for_offline_sam2" default="false"/>
     <arg name="offline_sam2_done_flag" default=".offline_sam2_done"/>
     <arg name="reuse_existing_dataset" default="false"/>
     <arg name="existing_dataset_dir" default="/home/ras/initial_dataset/"/>
     <arg name="rgb_depth_sync_tolerance_s" default="0.05"/>
     <arg name="rgb_depth_sync_wait_s" default="0.4"/>
-    <arg name="uncertainty_object_mask_weight" default="0.0"/>
-    <arg name="uncertainty_mask_gamma" default="4.0"/>
-    <arg name="uncertainty_bg_floor" default="0.005"/>
+    <arg name="uncertainty_object_mask_weight" default="0.25"/>
+    <arg name="uncertainty_mask_gamma" default="2.0"/>
+    <arg name="uncertainty_bg_floor" default="0.03"/>
     <arg name="uncertainty_fruit_weight" default="1.0"/>
-    <arg name="uncertainty_leaf_weight" default="0.4"/>
-    <arg name="uncertainty_bg_weight" default="0.02"/>
+    <arg name="uncertainty_leaf_weight" default="0.55"/>
+    <arg name="uncertainty_bg_weight" default="0.10"/>
 
     <param name="views_to_add" value="$(arg added_views)"/>
     <param name="nbv_start_step" value="$(arg nbv_start_step)"/>

@@ -332,17 +332,17 @@ class SplatfactoModelConfig(ModelConfig):
     """weight of depth uncertainty with the Hessian"""
     rgb_uncertainty_weight: float = 0.4
     """weight of rgb uncertainty with the Hessian"""
-    uncertainty_object_mask_weight: float = 0.02
+    uncertainty_object_mask_weight: float = 0.25
     """Down-weight factor for non-object gaussians in uncertainty Hessian accumulation."""
-    uncertainty_mask_gamma: float = 4.0
+    uncertainty_mask_gamma: float = 2.0
     """Exponent used to sharpen object-mask gating for uncertainty rendering."""
-    uncertainty_bg_floor: float = 0.01
+    uncertainty_bg_floor: float = 0.03
     """Residual ratio of uncertainty kept outside object region to avoid hard clipping."""
-    uncertainty_leaf_weight: float = 0.25
+    uncertainty_leaf_weight: float = 0.55
     """Relative uncertainty weight for leaf class (fruit is treated as 1.0)."""
     uncertainty_fruit_weight: float = 1.0
     """Relative uncertainty weight for fruit class."""
-    uncertainty_bg_weight: float = 0.02
+    uncertainty_bg_weight: float = 0.10
     """Relative uncertainty weight for background class."""
     eval_masked_metrics_only: bool = True
     """If True, compute eval image metrics only on object mask region when mask is available."""
@@ -1725,6 +1725,28 @@ class SplatfactoModel(Model):
 
         return rasterizer, params
 
+    def _per_gaussian_semantic_eig_weights(self, H_per_gaussian: torch.Tensor) -> torch.Tensor:
+        """Fruit weight 1; non-fruit weight delta = median(H|fruit)/median(H|non-fruit)."""
+        w = torch.ones_like(H_per_gaussian)
+        gp = getattr(self, "gauss_params", None)
+        if gp is None or "sam_mask_fruit" not in gp:
+            return w
+        fruit_prob = torch.sigmoid(gp["sam_mask_fruit"].detach())
+        if fruit_prob.ndim > 1:
+            fruit_prob = fruit_prob.squeeze(-1)
+        fruit_mask = fruit_prob > 0.5
+        other_mask = ~fruit_mask
+        if not fruit_mask.any() or not other_mask.any():
+            return w
+        med_f = torch.median(H_per_gaussian[fruit_mask])
+        med_o = torch.median(H_per_gaussian[other_mask])
+        eps = torch.as_tensor(1e-8, device=H_per_gaussian.device, dtype=H_per_gaussian.dtype)
+        delta = med_f / (med_o + eps)
+        return torch.where(
+            fruit_mask,
+            torch.ones_like(H_per_gaussian),
+            torch.full_like(H_per_gaussian, delta),
+        )
 
     @torch.no_grad()
     def compute_diag_H_rgb_depth(
@@ -1772,15 +1794,22 @@ class SplatfactoModel(Model):
         cur_H = [p.grad.detach().clone().square() for p in params[:-1]] #type: ignore
         use_object_mask = (is_touch or apply_object_mask) and self.config.learn_object_mask and (sam_masks is not None)
         effective_mask_weight = float(max(0.0, min(1.0, object_mask_weight)))
+        gp = getattr(self, "gauss_params", None)
+        has_fruit = gp is not None and "sam_mask_fruit" in gp
 
-        if use_object_mask:
+        if has_fruit:
+            H_pg = sum([reduce(p, "n ... -> n", "sum") for p in cur_H])
+            sem_w = self._per_gaussian_semantic_eig_weights(H_pg)
+            for i in range(len(cur_H)):
+                w_exp = sem_w.reshape(sem_w.shape[0], *([1] * (cur_H[i].ndim - 1)))
+                cur_H[i] = cur_H[i] * w_exp
+        elif use_object_mask:
             # soft-mask non-object gaussians by down-weighting their gradients.
             sam_masks_prob = torch.sigmoid(sam_masks)
             sam_masks_prob = torch.where(sam_masks_prob > 0.5, torch.ones_like(sam_masks_prob), torch.zeros_like(sam_masks_prob))
             mask = sam_masks_prob.squeeze(-1) == 0
 
             for i in range(len(cur_H)):
-                # keep gradients on ROI gaussians, but reduce non-ROI gradients instead of removing them entirely.
                 cur_H[i][mask] *= effective_mask_weight
         
         for p in params:
@@ -1789,7 +1818,6 @@ class SplatfactoModel(Model):
         rgb = rearrange(rendered_image, "c h w -> h w c")
         
         return {"rgb": rgb, "H": cur_H, "depth": rendered_depth}  # type: ignore
-
 
     @torch.no_grad()
     def compute_EIG(
@@ -1830,7 +1858,7 @@ class SplatfactoModel(Model):
                 + depth_weight * sum([reduce(p, "n ... -> n", "sum") for p in H_info_depth["H"]])
             )
             H_candidate = repeat(H_per_gaussian, "n -> n c", c=3).reshape(-1)
-            EIG[i] = torch.sum(H_inv * H_candidate) 
+            EIG[i] = torch.sum(H_inv * H_candidate)
 
         return EIG
     

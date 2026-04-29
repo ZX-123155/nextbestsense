@@ -12,8 +12,8 @@ class Splatfacto3D(ROSSplatfacto):
     def __init__(self, data_dir='bunny_blender_dir', render_uncertainty=False,
                  train_split_fraction=0.85, depth_uncertainty_weight=1.0, rgb_uncertainty_weight=1.0,
                  camera_optimizer_mode='off', quats_lr=5e-4, scales_lr=2e-3, opacities_lr=2e-2,
-                 uncertainty_object_mask_weight=0.0, uncertainty_mask_gamma=4.0, uncertainty_bg_floor=0.005,
-                 uncertainty_fruit_weight=1.0, uncertainty_leaf_weight=0.4, uncertainty_bg_weight=0.02):
+                 uncertainty_object_mask_weight=0.25, uncertainty_mask_gamma=2.0, uncertainty_bg_floor=0.03,
+                 uncertainty_fruit_weight=1.0, uncertainty_leaf_weight=0.55, uncertainty_bg_weight=0.10):
         """
         initialize 3DGS. Calls the ns-train cmd to avoid manual copy paste.
 

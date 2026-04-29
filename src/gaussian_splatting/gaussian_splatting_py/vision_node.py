@@ -267,12 +267,12 @@ class VisionNode(object):
         self.quats_lr = float(rospy.get_param("~quats_lr", "5e-4"))
         self.scales_lr = float(rospy.get_param("~scales_lr", "2e-3"))
         self.opacities_lr = float(rospy.get_param("~opacities_lr", "2e-2"))
-        self.uncertainty_object_mask_weight = float(rospy.get_param("~uncertainty_object_mask_weight", "0.0"))
-        self.uncertainty_mask_gamma = float(rospy.get_param("~uncertainty_mask_gamma", "4.0"))
-        self.uncertainty_bg_floor = float(rospy.get_param("~uncertainty_bg_floor", "0.005"))
+        self.uncertainty_object_mask_weight = float(rospy.get_param("~uncertainty_object_mask_weight", "0.25"))
+        self.uncertainty_mask_gamma = float(rospy.get_param("~uncertainty_mask_gamma", "2.0"))
+        self.uncertainty_bg_floor = float(rospy.get_param("~uncertainty_bg_floor", "0.03"))
         self.uncertainty_fruit_weight = float(rospy.get_param("~uncertainty_fruit_weight", "1.0"))
-        self.uncertainty_leaf_weight = float(rospy.get_param("~uncertainty_leaf_weight", "0.4"))
-        self.uncertainty_bg_weight = float(rospy.get_param("~uncertainty_bg_weight", "0.02"))
+        self.uncertainty_leaf_weight = float(rospy.get_param("~uncertainty_leaf_weight", "0.55"))
+        self.uncertainty_bg_weight = float(rospy.get_param("~uncertainty_bg_weight", "0.10"))
         self.gs_max_iterations = int(rospy.get_param("~gs_max_iterations", "11000"))
         
         # GS model
